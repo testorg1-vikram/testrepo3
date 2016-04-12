@@ -1,0 +1,197 @@
+# Required. User friendly name of the service.
+# porter and ethos
+service_name: some-service
+
+# Version lock the platform dependency. Use semantic versioning.
+# porter-only
+porter_version: v0.0.1
+
+# Optional. Not advertised. Some of our services still require this because
+# they have CloudFormation customizations that shouldn't live in porter.
+# porter-only
+stack_definition_path: .porter/stack_definition
+
+# Optional. Slack channel where CI/CD pipeline notifications are sent.
+# ethos-only
+slack:
+  team: team1
+  username: user1
+  channel: channel1
+
+# Required.
+# porter and ethos
+environments:
+# name is an opaque string but must match /^[0-9a-zA-Z]+$/
+# The dev environment describes a developer environment with a single
+# container and minimal resource requirements.
+
+  # Note: The environments get deployed in the order specified in this file.
+  # Required. At least one environment is required. User friendly name of the environment.
+  # porter and ethos
+  - name: dev1 # Note: There can be multiple test environment of DEV type, e.g. "dev, qa1, qa2 etc".
+    # Optional in the simplest case with defaults.
+    # The default is a "inet" type service with a single EXPOSEd port and a health
+    # check of `GET /health HTTP/1.1`
+
+    # Required. "type" is one of DEV/STAGE/PROD. Based on this appropriate Mesos cluster may get selected.
+    # ethos-only
+    cluster_type: DEV
+    # Required. List of containers for the service.
+    # porter and ethos
+    containers:
+      # see footnote [1]
+      # Required. User friendly image ID for this container image.
+      # porter and ethos
+      - id: some_image
+        # Required. Allowed values: [inet|worker|cron].
+        # porter and ethos
+        topology: inet
+        # Optional (Default = one time). Relevant for worker|cron. Linux crontab format.
+        # porter and ethos
+        schedule: 00 09-18 * * *
+        # Optional. Required if more than one container is defined
+        # porter and ethos
+        dockerfile_path: Dockerfile
+        # Optional. override CMD. e.g., `docker run image:latest <docker_run_cmd>`
+        # porter and ethos
+        docker_run_cmd: --opt foo
+        # porter and ethos
+        inet_port: 3000
+        # Optional. The default is HTTP GET /health
+        # porter and ethos
+        health_check:
+          # [GET|TCP]
+          # porter-only
+          method: GET
+          # porter and ethos
+          path: /health
+        # Optional. (Default = 0.5) Number of CPU(s) Required by this container.
+        # porter and ethos
+        cpus: 1.5
+        # Optional. (Default = 512). Memory required by this container.
+        # porter and ethos
+        mem: 1024
+        # Optional. Create a single instance of this container [1]. Porter specific. Ignored by Ethos.
+        # porter and ethos
+        instances: 1
+
+    # Optional. Ethos-only
+    checklist_pre_build:
+      - item: Verified changes in <a target="_blank" href="https://some-service.com/test/">test enviroment</a>?
+        required: false
+      - item: Did you get the code review done?
+        required: true
+
+    # Optional. Ethos-only
+    checklist_post_build:
+      - item: Inform the team about the change.
+        required: true
+
+    # Required
+    # porter-only for every region field
+    regions:
+    # Our developers are based in Seattle, in this example
+      - name: us-west-2
+        # AZs are heterogeneous.
+        # Some don't work with others and certain instance types can only deploy to
+        # certain AZs. For a custom VPC (i.e. not EC2-Classic or Default VPC) we
+        # additionally need the subnet ID
+        availability_zones:
+          - {name: us-west-2a, subnet_id: ''}
+        # This is the role ARN porter needs to do
+        # http://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html
+        role_arn: arn:aws:iam::123456789012:role/some-service-deployment
+        # Not defined for a developer environment
+        # elb:
+
+        # The name of the SSH key in the region that will be used to login to the
+        # instance
+        key_pair_name: some-developer-key
+        # How is the service distributed?
+        # S3 is the only option porter currently supports
+        service_distribution:
+          # [s3|docker_registry]
+          cluster_type: s3
+          # If type is s3, prefix its options with s3_
+          # The bucket into which the service payload will be uploaded by porter
+          # in GoCD, and then downloaded by porter on an EC2 instance
+          s3_bucket: some-service-builds-us-west-2
+
+          # If type is docker_registry, prefix its options with docker_registry_
+          # docker_registry_url: http://somedomain.com
+
+    # prod is a more complex production environment
+  - name: prod
+    cluster_type: PROD  # One of DEV/STAGE/PROD
+
+    containers:
+      - id: some_container
+        topology: inet
+        dockerfile_path: Dockerfile
+        inet_port: 3000
+        health_check:
+          method: GET
+          path: /health
+        cpus: 4
+        mem: 400
+        instances: 10
+      # The prod environment additionally defines a worker variant of the service's
+      # codebase to be run
+      - id: some_worker_container
+        topology: worker
+        dockerfile_path: Dockerfile.worker
+        cpus: 8
+        mem: 1024
+        instances: 4
+      # And lastly a simple cron job
+      - id: some_cron_container
+        topology: cron
+        dockerfile_path: Dockerfile.cron
+        cpus: 1
+        mem: 100
+        instances: 1
+
+    # Optional. Ethos-only
+    checklist_pre_build:
+      - item: Verified changes in <a target="_blank" href="https://some-service.com/stage/">stage enviroment</a>?
+        required: false
+
+    # Optional. Ethos-only
+    checklist_post_build:
+      - item: Test changes after deploy.
+        required: true
+
+    regions:
+      - name: us-west-2
+        availability_zones:
+          - {name: us-west-2a, subnet_id: ''}
+          - {name: us-west-2b, subnet_id: ''}
+          - {name: us-west-2c, subnet_id: ''}
+
+        role_arn: arn:aws:iam::123456789012:role/some-service-deployment
+
+        elb: some-service-production
+
+        key_pair_name: some-production-key
+
+        service_distribution:
+          cluster_type: s3
+          s3_bucket: some-service-builds-us-west-2
+
+      - name: us-east-1
+        availability_zones:
+          - {name: us-east-1a, subnet_id: ''}
+          - {name: us-east-1b, subnet_id: ''}
+          - {name: us-east-1c, subnet_id: ''}
+
+        role_arn: arn:aws:iam::123456789012:role/some-service-deployment
+
+        elb: some-service-production
+
+        key_pair_name: some-production-key
+
+        service_distribution:
+          cluster_type: s3
+          s3_bucket: some-service-builds-us-east-1
+
+# [1] matches Marathon app definition https://mesosphere.github.io/marathon/docs/application-basics.html
